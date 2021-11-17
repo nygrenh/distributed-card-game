@@ -7,23 +7,21 @@ Members: Daniel Koch, Henrik Nygren, Sebastian Sergelius
 
 ## Detailed description of our idea
 
-Our project will consist of a very simple card game where we have one card deck containing 52 cards. First step is to shuffle the card deck with some N contesters (nodes) in a manner where cheating is hard or impossible. After the deck has been shuffled we randomly choose a contester to pick up the card on top of the deck and then in a clockwise order all the other contesters pick up the following card on top of the deck. Once each contester has picked up their card, they turn them around and the winner will be the contester with the highest card.
+Our project will consist of a very simple card game where we have one card deck containing 52 cards. Cards are numbered from 1-52. First step is to shuffle the card deck with two nodes, one being leader and other being a random player in the game, in a manner where cheating is hard or impossible. After the deck has been shuffled we randomly choose a contester to pick up the card on top of the deck and then the leader node decides the turns when each player may pick up a card from the top of the deck. Once each contester has picked up their card, they turn them around and the winner will be the contester with the highest card.
 
-To ensure cheating doesn't happen while shuffling the cards, we still haven't decided on which method for implementation we will use, but we've found potential solutions, such as:
+To ensure cheating doesn't happen while shuffling the cards, we will implement the Mental poker card shuffling algorithm.
 * https://en.wikipedia.org/wiki/Mental_poker#Shuffling_cards_using_commutative_encryption
-* http://forensics.umass.edu/pubs/baughman.ToN.pdf
-* https://www.cs.du.edu/~chrisg/publications/pittman-netgames11.pdf
 
-Each contester will be running the same underlying system, which we will built upon using docker/docker-compose. To ensure that contesters can connect, we need to have a master node, which is responsible for handling the connections. Connection will be established using the master nodes IP or if possible, any contesters IP-address.
+Each contester will be running the same underlying system, which we will built upon using docker/docker-compose. To ensure that contesters can connect, we need to have a leader node, which is responsible for handling the connections. Connection will be established using the leader nodes IP. If a player connects to a non-leader node, this node will provide the correct IP to connect to.
 
 For the project we will be using Docker and Python to build the distributed card game.
 
-## The nodes
+## The Nodes
 
 In our approach, all the nodes are going to run identical software. We have the following node types:
 
-- Leader node: This node will be responsible for ensuring the card shuffling is done confidentially by holding the encryption keys for the deck being shuffled in the game, and it will also be responsible for synchronizing the turns. The leader node deals cards from the encrypted deck to the others. This node is selected with leader election and changes after each round. If the leader node drops out or cheats, it will be penalized somehow, and a new leader node will be elected. After the game has ended, the leader node's responsibility is to release the encryption keys for the shuffled deck so that others can validate that there has been no cheating.
-- Participant node: Will be playing in the game and potentially helping with the shuffling of the encrypted deck. Holds a copy of the encrypted deck and will validate the that the leader node did not cheat upon receiving the encryption keys at the end of the game. At the beginning of the round, the participant node will decide whether they want to continue in the game and whether they are willing to bet money in this game round.
+- Leader node: This node will be responsible for ensuring the card shuffling is done confidentially by holding the encryption keys for the cards in the deck, and it will also be responsible for synchronizing the turns. The leader node starts the card shuffling by encrypting each card, then shuffles the deck and passes the deck to a random player, which then encrypts the cards again and shuffles the deck. This node is selected with leader election and changes only if he drops out from the session. After each participant has picked up a card, they can ask for the decryption keys from the leader node and the other node that was involved in shuffling.
+- Participant node: Will be playing in the game and potentially helping with the shuffling of the encrypted deck. Will be picking up a card from the shuffled deck.
 
 ## Scalability
 
@@ -78,8 +76,8 @@ Message Type: request_key
 Reponse to join
 ```json
 {
-    "master": <master_id>,
-    "assigned_id": <id asigned by master>
+    "leader": <leader_id>,
+    "assigned_id": <id asigned by leader>
     "clients": [list of (client_id, client_ip) pairs]
 }
 ```
