@@ -28,3 +28,64 @@ In our approach, all the nodes are going to run identical software. We have the 
 ## Scalability
 
 The chosen approach should scale to some degree. It should be possible to add many participants to the game -- the main limitation of scalability is that everyone is connecting to every other participant, meaning that at some point each node has too many connections. However, the protocol used here is so lightweight that the number of participants would need to grow to be very large before anyone is overwhelmed with messages. The scalability of the approach could be improved by utilizing a structured peer-to-peer network.
+
+## Messages
+Identifying the message types isnt completely possible yet since we haven't decided the algorithm yet, however
+here is some possible examples:
+
+```json
+{
+    "sender": <sender_id>,
+    "message_type": "join" | "leave" | "shuffle" | "deck" | "request_key",
+    "message": see message types below
+}
+```
+Message Type: join
+```json
+{
+    "ip": <sender_ip>
+}
+```
+Message Type: leave
+```json
+{
+    "id": <sender_id>
+}
+```
+Message Type: shuffle
+```json
+{
+    "deck": [list of cards, order matters]
+}
+```
+Message Type: deck
+```json
+{
+    "deck": [list of cards, order matters]
+}
+```
+Message Type: request_key
+```json
+{
+    "card": <which card's key is requested>
+}
+```
+
+<Some message to publish which card the player picked, or peraps this is with request_key>
+
+### Responses:
+
+Reponse to join
+```json
+{
+    "master": <master_id>,
+    "assigned_id": <id asigned by master>
+    "clients": [list of (client_id, client_ip) pairs]
+}
+```
+Reponse to request_key
+```json
+{
+    "key": <key>
+}
+```
