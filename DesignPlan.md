@@ -2,7 +2,7 @@
 
 Our idea is to create a distributed card game, where each participant is involved in shuffling a card deck and this card deck is then used to play a simple card game.
 
-Group name: -
+Group name: - #27  
 Members: Daniel Koch, Henrik Nygren, Sebastian Sergelius
 
 ## Detailed description of our idea
