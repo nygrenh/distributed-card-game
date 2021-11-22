@@ -28,8 +28,7 @@ In our approach, all the nodes are going to run identical software. We have the 
 The chosen approach should scale to some degree. It should be possible to add many participants to the game -- the main limitation of scalability is that everyone is connecting to every other participant, meaning that at some point each node has too many connections. However, the protocol used here is so lightweight that the number of participants would need to grow to be very large before anyone is overwhelmed with messages. The scalability of the approach could be improved by utilizing a structured peer-to-peer network.
 
 ## Messages
-Identifying the message types isnt completely possible yet since we haven't decided the algorithm yet, however
-here is some possible examples:
+These are some concepts for the messages and will not be final versions.
 
 ```json
 {
