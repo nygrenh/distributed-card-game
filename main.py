@@ -5,8 +5,10 @@ import cmd
 import threading
 import requests
 import random
+import json
 from cryptography.fernet import Fernet
-from threading import Lock
+from threading import Lock, Thread
+import time
 
 from flask_middleware import middleware
 
@@ -18,18 +20,28 @@ class Player(TypedDict):
 
 
 class Deck:
+
+    # Make a new deck 0-51
     def __init__(self):
         self.cards = list(range(52))
         self.top_card = 51
 
+    # Init Deck from a JSON deck
+    def __init__(self, jsonString):
+        self.cards = json.loads(jsonString)
+        self.top_card = 51
+
+    # Get the top card
     def pop(self):
         card = self.cards[self.top_card]
         self.top_card -= 1
         return card
 
+    # Shuffle the deck
     def shuffle(self):
         random.shuffle(self.cards)
 
+    # encrypt the deck with a key and return the key
     def encrypt(self):
         key = Fernet.generate_key()
         fernet = Fernet(key)
@@ -39,10 +51,15 @@ class Deck:
             )
         return key
 
+    # decrypt the deck using a key given as an input
     def decrypt(self, key):
         fernet = Fernet(key)
         for i in range(52):
             self.cards[i] = int.from_bytes(fernet.decrypt(self.cards[i]), "big")
+
+    # Return a json version of the deck
+    def cards_to_json(self):
+        return json.dumps(self.cards)
 
 
 class JoinRequest(TypedDict):
@@ -51,25 +68,30 @@ class JoinRequest(TypedDict):
 
 class JoinResponse(TypedDict):
     message: str
-    nodes: Dict[str, Player]
+    nodes: Dict[int, Player]
     your_player_number: int
 
 
 class NodeList(TypedDict):
     message: str
-    nodes: Dict[str, Player]
+    nodes: Dict[int, Player]
 
 
 class NewNodeListMessage(TypedDict):
-    nodes: Dict[str, Player]
+    nodes: Dict[int, Player]
+
+
+class ReverseBullyElectionResponse(TypedDict):
+    taking_over: bool
 
 
 # The distributed state of the Node
 # First node is player 1
 NEXT_PLAYER_NUMBER = 1
-MASTER_NODE_NUMBER = 1
+LEADER_NODE_NUMBER = 1
 OWN_NODE_NUMBER = 1
-nodes: Dict[str, Player] = {}
+nodes: Dict[int, Player] = {}
+LEADER_ELECTION_ONGOING = False
 
 app = flask.Flask(__name__)
 app.config["DEBUG"] = False
@@ -80,6 +102,10 @@ app.wsgi_app = middleware(app.wsgi_app)
 class CommandLoop(cmd.Cmd):
     def precmd(self, line: str) -> str:
         print(f"Processing command: {line}")
+        leader_node_healthy = check_leader_node_health()
+        if not leader_node_healthy:
+            print("Leader node is not healthy. Starting a new leader election.")
+            reverse_bully()
         return super().precmd(line)
 
     def postcmd(self, stop: bool, line: str) -> bool:
@@ -110,11 +136,108 @@ class CommandLoop(cmd.Cmd):
         print(nodes)
 
 
+def check_leader_node_health() -> bool:
+    global LEADER_NODE_NUMBER
+    global OWN_NODE_NUMBER
+    global nodes
+    if LEADER_NODE_NUMBER == OWN_NODE_NUMBER:
+        print("Not checking leader health because I am the leader.")
+        return True
+    print("Checking leader node health.")
+    leader_node_ip = nodes[LEADER_NODE_NUMBER]["ip"]
+    try:
+        health_check_res = requests.get(
+            f"http://{leader_node_ip}:6376/health", timeout=5
+        ).json
+    except:
+        print("Health check failed.")
+        return False
+    print("The leader is healthy")
+    return True
+
+
+# Bully algorithm, but prefers small numbers
+def reverse_bully():
+    global LEADER_ELECTION_ONGOING
+    LEADER_ELECTION_ONGOING = True
+    victory = reverse_bully_send_election_messages()
+    if victory:
+        print("I won the election. I am the new leader.")
+        global LEADER_NODE_NUMBER
+        LEADER_NODE_NUMBER = OWN_NODE_NUMBER
+        announce_election_victory()
+    while LEADER_ELECTION_ONGOING:
+        # Fine to sleep since we're in UI thread and the http server is running on a different thread.
+        time.sleep(0.1)
+
+
+# Returns true if nobody wants to take over the election, false otherwise
+def reverse_bully_send_election_messages() -> bool:
+    global nodes
+    res = [node for node in nodes.values() if node["player_number"] < OWN_NODE_NUMBER]
+    for node in res:
+        try:
+            response: ReverseBullyElectionResponse = requests.post(
+                f"http://{node['ip']}:6376/election", timeout=5
+            ).json
+            if response["taking_over"]:
+                return False
+        except:
+            print("Timed out waiting for response from node:", node["player_number"])
+    return True
+
+
+def announce_election_victory():
+    print("Announcing election victory.")
+    for node in nodes:
+        try:
+            request.post(f"http://{node['ip']}:6376/new-leader", timeout=5)
+        except:
+            print(
+                "Timed out waiting acknowledgement for election victory announcement:",
+                node["player_number"],
+            )
+
+
 def main():
     print("Starting node")
     server_thread = threading.Thread(target=start_server)
     server_thread.start()
     start_cmdloop()
+
+
+@app.route("/election", methods=["POST"])
+def election() -> ReverseBullyElectionResponse:
+    global nodes
+    origin = request.remote_addr
+    if origin in [node["ip"] for node in nodes.values()]:
+        origin_number = next(
+            node["player_number"] for node in nodes.values() if node["ip"] == origin
+        )
+        if origin_number > OWN_NODE_NUMBER:
+            Thread(target=take_over_bully).start()
+            return {"taking_over": True}
+    return {"taking_over": False}
+
+
+@app.route("/new-leader", method=["POST"])
+def assign_new_leader():
+    global LEADER_NODE_NUMBER
+    global LEADER_ELECTION_ONGOING
+    origin = request.origin
+    if origin in [node["ip"] for node in nodes.values()]:
+        origin_number = next(
+            node["player_number"] for node in nodes.values() if node["ip"] == origin
+        )
+        if origin_number < OWN_NODE_NUMBER:
+            LEADER_NODE_NUMBER = origin_number
+            LEADER_ELECTION_ONGOING = False
+    return {"message": "Ok, assigned new leader."}
+
+
+def take_over_bully():
+    print("Taking over the election.")
+    reverse_bully()
 
 
 @app.route("/", methods=["GET"])
@@ -156,7 +279,7 @@ def register_nodes():
         origin = request.remote_addr
         # print("origin", origin)
         if NEXT_PLAYER_NUMBER == 1:
-            nodes[MASTER_NODE_NUMBER] = Player(
+            nodes[LEADER_NODE_NUMBER] = Player(
                 player_number=1,
                 ip=json["your_ip"],
                 score=0,
@@ -164,7 +287,7 @@ def register_nodes():
             NEXT_PLAYER_NUMBER = 2
 
         # Check if node trying to join is already in-game
-        if origin in [x["ip"] for x in nodes.values()]:
+        if origin in [node["ip"] for node in nodes.values()]:
             print(
                 "Node with IP",
                 origin,

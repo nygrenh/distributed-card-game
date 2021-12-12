@@ -21,7 +21,8 @@ Each participant will run the same software, which will be a Python program runn
 
 ## Core functionality
 
-Our environment is built on docker containers, each container running the same code. Commands from nodes will be taken from STDIN in terminal.
+Our environment is built on docker containers, each container running the same code. Commands from nodes will be taken from STDIN in terminal. Before each command we check that the leader node is alive and healthy.
+
 The following commands are available:
 * `join <ip>` - joins an ongoing game or creates a game if first participant joining the IP
 * `leave` - leaves the game
@@ -29,9 +30,9 @@ The following commands are available:
 
 ### Creating and joining a game
 
-Each participant will be running the same environment. First participant node will join another (master) node, which will define the master node. The first joining participant will provide the master node its IP-address it used to join with. Once another participant node joins, he can join any of the participants in the game. Participants will provide the master node IP, which will then returned to joining participant, so he knows where to route his join request.
+Each participant will be running the same environment. First participant node will join another (leader) node, which will define the leader node. The first joining participant will provide the leader node its IP-address it used to join with. Once another participant node joins, he can join any of the participants in the game. Participants will provide the leader node IP, which will then returned to joining participant, so he knows where to route his join request.
 
-Master node will be the one who accepts join request, names the participants (i.e. Player1) and broadcasts to all other players the current state, i.e. the participants.
+Leader node will be the one who accepts join request, names the participants with running integer and broadcasts to all other players the current state, i.e. the participants.
 
 ### Leaving a game
 
