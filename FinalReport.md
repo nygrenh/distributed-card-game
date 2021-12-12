@@ -26,7 +26,7 @@ Our environment is built on docker containers, each container running the same c
 The following commands are available:
 * `join <ip>` - joins an ongoing game or creates a game if first participant joining the IP
 * `leave` - leaves the game
-
+* `list` - list the state the node knows off
 
 ### Creating and joining a game
 
