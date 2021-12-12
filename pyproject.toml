@@ -9,6 +9,7 @@ license = "Apache-2.0"
 python = "^3.9"
 requests = "^2.26.0"
 Flask = "^2.0.2"
+cryptography = "^36.0.0"
 
 [tool.poetry.dev-dependencies]
 black = {version = "^21.10b0", allow-prereleases = true}
