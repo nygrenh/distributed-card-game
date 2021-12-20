@@ -1,4 +1,4 @@
-from typing import Dict, TypedDict
+from typing import DefaultDict, Dict, TypedDict
 import flask
 from flask import request
 import cmd
@@ -7,9 +7,10 @@ import requests
 import random
 import json
 from cryptography.fernet import Fernet
-from threading import Lock, Thread
+from threading import Lock, Thread, local
 import time
 import pdb
+from enum import Enum
 
 from flask_middleware import middleware
 
@@ -52,21 +53,15 @@ class Deck:
             )
         return key
 
-    def encrypt_one(self, index):
-        key = Fernet.generate_key()
-        fernet = Fernet(key)
-        self.cards[index].to_bytes(self.cards[index].bit_length + 7 // 8, "big")
-        return key
-
     # decrypt the deck using a key given as an input
     def decrypt_all(self, key):
         fernet = Fernet(key)
         for i in range(52):
             self.cards[i] = int.from_bytes(fernet.decrypt(self.cards[i]), "big")
 
-    def decrypt_one(self, key, index):
+    def decrypt_one(self, key, card):
         fernet = Fernet(key)
-        self.cards[index] = int.from_bytes(fernet.decrypt(self.cards[index]), "big")
+        return int.from_bytes(fernet.decrypt(card), "big")
 
     # Return a json version of the deck
     def cards_to_json(self):
@@ -84,6 +79,23 @@ class JoinResponse(TypedDict):
     your_player_number: int
     leader_node_number: int
 
+class DoubleEncryptedDeckRequest(TypedDict):
+    deck: Deck
+
+class PlzHelpWithEncryptingDeckRequest(TypedDict):
+    deck: Deck
+
+class PlzHelpWithEncryptingDeckResponse(TypedDict):
+    deck: Deck
+
+class ShareKeyRequest(TypedDict):
+    key: str
+
+class DealResultsBroadcastRequest(TypedDict):
+    # Key player number, value encrypted card
+    who_got_what_cards: Dict[int, str]
+    helper_player_number: int
+
 
 class NodeList(TypedDict):
     message: str
@@ -92,20 +104,33 @@ class NodeList(TypedDict):
 
 class NewNodeListMessage(TypedDict):
     nodes: Dict[int, Player]
+    next_player_number: int
 
 
 class ReverseBullyElectionResponse(TypedDict):
     taking_over: bool
 
 
-# The distributed state of the Node
+class GamePhase(Enum):
+    WAITING_FOR_PLAYERS = 0
+    GAME_ONGOING = 1
+    GAME_OVER = 2
+
+# The distributed state of NODE
 # First node is player 1
 NEXT_PLAYER_NUMBER = 1
 LEADER_NODE_NUMBER = 1
 OWN_NODE_NUMBER = -1
 NODES: Dict[int, Player] = {}
 LEADER_ELECTION_ONGOING = False
-
+GAME_PHASE = GamePhase.WAITING_FOR_PLAYERS
+ENCRYPTION_KEY: str | None = None
+HELPER_ENCRYPTION_KEY: str | None = None
+DECK: Deck | None = None
+DOUBLE_ENCRYPTED_DECK: Deck | None = None
+DEAL_RESULTS: Dict[int, str] | None = None
+HELPER_MAP_WHO_GOT_THE_CARDS: Dict[int, False] = DefaultDict(bool)
+# End global state for NODE
 app = flask.Flask(__name__)
 app.config["DEBUG"] = False
 
@@ -152,11 +177,51 @@ class CommandLoop(cmd.Cmd):
         print("Listing all nodes in the game.")
         print(NODES)
 
+    def do_start_game(self, line: str):
+        global ENCRYPTION_KEY
+        global DECK
+        global DOUBLE_ENCRYPTED_DECK
+        global GAME_PHASE
+
+        if OWN_NODE_NUMBER == LEADER_NODE_NUMBER:
+            print("Starting game.")
+            broadcast_game_starting()
+            # Todo handle if this fails
+            GAME_PHASE = GamePhase.GAME_ONGOING
+            node_that_helps_with_shuffling = choose_follower_to_help_with_shuffling()
+            # Master starts the shuffling. It first chooses a key and encrypts all cards with the same key.
+            DECK = Deck()
+            ENCRYPTION_KEY = DECK.encrypt_all()
+            DECK.shuffle()
+            # Next we send the deck to the helper node
+            DOUBLE_ENCRYPTED_DECK = send_deck_to_node_to_help_with_shuffling(DECK, node_that_helps_with_shuffling)
+            # deal cards
+            deal_request: DealResultsBroadcastRequest = { "helper_player_number": node_that_helps_with_shuffling.player_number}
+            for node in NODES:
+                deal_request["who_got_what_cards"][node] = DOUBLE_ENCRYPTED_DECK.pop()
+            broadcast_dealt_cards(deal_request)
+            # Next, the encryption keys will be published
+
+            # As the leader, we are in different thread (Command Line) and we can wait for the HELPER_ENCRYPTION_KEY to be broadcasted
+            # Via the HTTP POST by the helper node.
+            # Helper will send it to us once it has received confirmation from all nodes that they have received the dealt cards
+            while HELPER_ENCRYPTION_KEY == None:
+                time.sleep(0.5)
+
+            # Now we can publish leader encryption key as we received the helper key and majority has confirmed receiving the deck
+            broadcast_leader_encryption_key()
+            highest_card = -1
+            highest_card_owner = None
+            for (node, card) in deal_request["who_got_what_cards"].items():
+                helper_decrypted_card = Deck.decrypt_one(card, HELPER_ENCRYPTION_KEY)
+                decrypted_card_value = Deck.decrypt_one(helper_decrypted_card, ENCRYPTION_KEY)
+                if decrypted_card_value > highest_card:
+                    highest_card = decrypted_card_value
+                    highest_card_owner = node
+        else:
+            print("Not the leader. Cannot start game.")
 
 def check_leader_node_health() -> bool:
-    global LEADER_NODE_NUMBER
-    global OWN_NODE_NUMBER
-    global NODES
     if OWN_NODE_NUMBER == -1:
         print("Not checking leader node health")
         return True
@@ -166,7 +231,7 @@ def check_leader_node_health() -> bool:
     print("Checking leader node health.")
     leader_node_ip = NODES[LEADER_NODE_NUMBER]["ip"]
     try:
-        health_check_res = requests.get(
+        requests.get(
             f"http://{leader_node_ip}:6376/health", timeout=5
         ).json
     except:
@@ -198,8 +263,8 @@ def reverse_bully_send_election_messages() -> bool:
     print(
         f"Sending election messages to nodes that have number smaller than {OWN_NODE_NUMBER}."
     )
-    res = [node for node in NODES.values() if node["player_number"] < OWN_NODE_NUMBER]
-    for node in res:
+    nodes_to_receive_eletion_msg = [node for node in NODES.values() if node["player_number"] < OWN_NODE_NUMBER]
+    for node in nodes_to_receive_eletion_msg:
         print(f"Sending election message to {node['player_number']}")
         try:
             response: ReverseBullyElectionResponse = requests.post(
@@ -218,6 +283,31 @@ def reverse_bully_send_election_messages() -> bool:
             print("Timed out waiting for response from node:", node["player_number"])
     return True
 
+
+def send_deck_to_node_to_help_with_shuffling(deck: Deck, node_that_helps_with_shuffling: Player) -> Deck:
+    global NODES
+    print(f"Sending deck to node {node_that_helps_with_shuffling}")
+
+    request: PlzHelpWithEncryptingDeckRequest = { deck: Deck }
+
+    res: PlzHelpWithEncryptingDeckResponse = requests.post(
+        f"http://{node_that_helps_with_shuffling['ip']}:6376/plz-help-with-encrypting", json=request, timeout=5
+    ).json()
+    return res["deck"]
+
+
+def choose_follower_to_help_with_shuffling() -> Player:
+    print(
+        "Choosing node to help with shuffling"
+    )
+    if len(NODES.values()) == 0:
+        print("The game is empty")
+        raise Exception("The game is empty")
+    # Exclude own player number
+    players_excluding_myself = [node for node in NODES.values() if node["player_number"] != OWN_NODE_NUMBER]
+    chosen_one = random.choice(players_excluding_myself)
+    print(f"Node {chosen_one['player_number']} will help with shuffling.")
+    return chosen_one
 
 def announce_election_victory():
     print("Announcing election victory.")
@@ -316,10 +406,15 @@ def register_nodes():
         global NEXT_PLAYER_NUMBER
         global NODES
         global LEADER_NODE_NUMBER
-        # print("request.data", request.json)
+        global GAME_PHASE
+
+        # Do not let players join while game ongoing.
+        if GAME_PHASE == GAME_PHASE.GAME_ONGOING:
+            return {"message": "Game ongoing, please join later."}
+
         json: JoinRequest = request.json
         origin = request.remote_addr
-        # print("origin", origin)
+
         if NEXT_PLAYER_NUMBER == 1:
             NODES[LEADER_NODE_NUMBER] = Player(
                 player_number=1,
@@ -327,9 +422,8 @@ def register_nodes():
                 score=0,
             )
             NEXT_PLAYER_NUMBER = 2
-        # TODO: If not LEADER, return LEADER IP.
 
-        # Check if node trying to join is already in-game
+        # Check if node trying to join is/was already in-game
         if origin in [node["ip"] for node in NODES.values()]:
             print(
                 "Node with IP",
@@ -338,7 +432,6 @@ def register_nodes():
             )
             # FAULT_TOLERANCE: If node drops out of game, get list his list of nodes, if it is empty, return him the current state
             get_nodes_result = requests.get(f"http://{origin}:6376/get-nodes").json
-            print(get_nodes_result)
             if get_nodes_result["nodes"].length == 0:
                 print(
                     "Node did probably crash or loose connection, sending him the game state."
@@ -369,21 +462,120 @@ def register_nodes():
 
 
 def broadcast_new_node_list():
-    global NODES
     for node in NODES.values():
         if node["player_number"] == OWN_NODE_NUMBER:
             continue
-        new_node_list: NewNodeListMessage = {"nodes": NODES}
-        res_obj = requests.post(
+        new_node_list: NewNodeListMessage = {"nodes": NODES, "next_player_number": NEXT_PLAYER_NUMBER}
+        requests.post(
             f"http://{node['ip']}:6376/new-node-list", json=new_node_list
         )
 
+def broadcast_game_starting():
+    for node in NODES.values():
+        if node["player_number"] == OWN_NODE_NUMBER:
+            continue
+        requests.post(
+            f"http://{node['ip']}:6376/game-starting"
+        )
+
+def broadcast_helper_encryption_key():
+    for node in NODES.values():
+        if node["player_number"] == OWN_NODE_NUMBER:
+            continue
+        body: ShareKeyRequest = {"key": HELPER_ENCRYPTION_KEY}
+        requests.post(
+            f"http://{node['ip']}:6376/helper-key", json=body
+        )
+
+def broadcast_leader_encryption_key():
+    for node in NODES.values():
+        if node["player_number"] == OWN_NODE_NUMBER:
+            continue
+        body: ShareKeyRequest = {"key": ENCRYPTION_KEY}
+        requests.post(
+            f"http://{node['ip']}:6376/leader-key", json=body
+        )
 
 @app.route("/new-node-list", methods=["POST"])
 def new_node_list():
     global NODES
     NODES = {int(k): v for k, v in request.json["nodes"].items()}
     return {"message": "New node list received"}
+
+@app.route("/game-starting", methods=["POST"])
+def game_starting():
+    global GAME_PHASE
+    GAME_PHASE = GamePhase.GAME_ONGOING
+    return {"message": "Ok"}
+
+
+@app.route("/plz-help-with-encrypting", methods=["POST"])
+def handle_plz_help_with_encrypting() -> PlzHelpWithEncryptingDeckResponse:
+    json: PlzHelpWithEncryptingDeckRequest = request.json
+    global DECK
+    global ENCRYPTION_KEY
+    DECK = Deck(jsonString=json["deck"])
+    ENCRYPTION_KEY = DECK.encrypt_all()
+    DECK.shuffle()
+    # Broadcast to all other nodes so that everyone can later verify that there has been no cheating
+    for node in NODES.values():
+        if node["player_number"] == OWN_NODE_NUMBER or node["player_number"] == LEADER_NODE_NUMBER:
+            continue
+        requests.post(
+            f"http://{node['ip']}:6376/double-encrypted-deck", json={"deck": DECK.cards_to_json()}
+        )
+    return {"deck": DECK.to_json()}
+
+
+@app.route("/double-encrypted-deck", methods=["POST"])
+def handle_double_encrypted_deck():
+    global DOUBLE_ENCRYPTED_DECK
+    json: DoubleEncryptedDeckRequest = request.json
+    deck = Deck(jsonString=json["deck"])
+    DOUBLE_ENCRYPTED_DECK = deck
+    return {"message": "Ok"}
+
+
+def broadcast_dealt_cards(deal_request: DealResultsBroadcastRequest):
+    for node in NODES.values():
+        if node["player_number"] == OWN_NODE_NUMBER:
+            continue
+        requests.post(
+            f"http://{node['ip']}:6376/deal-results", json=deal_request
+        )
+
+@app.route("/deal-results", methods=["POST"])
+def handle_deal_results():
+    global DEAL_RESULTS
+    json: DealResultsBroadcastRequest = request.json
+    DEAL_RESULTS = json["who_got_what_cards"]
+    # Fetch the helper ip to inform I got the dealt cards
+    helper_ip = next(
+            node["ip"] for node in NODES.values() if node["player_number"] == json["helper_player_number"]
+        )
+    requests.post(f"http://{helper_ip}:6376/i-got-the-dealt-cards")
+    return {"message": "Ok"}
+
+
+i_got_the_dealt_cards_lock = Lock()
+
+# Helper receives this when others have gotten the dealt cards
+@app.route("/i-got-the-dealt-cards", methods=["POST"])
+def handle_i_got_the_dealt_cards():
+    global HELPER_MAP_WHO_GOT_THE_CARDS
+    try:
+        i_got_the_dealt_cards_lock.acquire()
+        origin = request.remote_addr
+        sender_player = next(node for node in NODES.values() if node["ip"] == origin)
+        HELPER_MAP_WHO_GOT_THE_CARDS[sender_player["player_number"]] = True
+        # If the majority of nodes have gotten the deck, we can pubish our encryption key to the leader
+        number_of_nodes_who_got_the_cards = len([node for node in HELPER_MAP_WHO_GOT_THE_CARDS.values() if node])
+        if number_of_nodes_who_got_the_cards >= len(NODES) / 2:
+            # Broadcast this to everyone so that the key can be used for verification. What is more, the leader should publish their key once they have received this
+            broadcast_helper_encryption_key()
+        return {"message": "Ok"}
+    finally:
+        i_got_the_dealt_cards_lock.release()
 
 
 @app.route("/leave", methods=["POST"])
