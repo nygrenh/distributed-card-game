@@ -58,7 +58,7 @@ The two treads communicate with each other using shared memory. Because we are r
 ## Communication
 
 Either actions in the UI thread or the web server thread can trigger communication to the other nodes. Communication is done by directly starting an HTTP request to the other node when needed. Messages are JSON messages that are posted to the other node's port 6376.
-The most common HTTP requests and responses have Python types that act as documenting the messages.
+The most common HTTP requests and responses have Python types that act as documenting the messages in the code.
 
 \scriptsize
 
