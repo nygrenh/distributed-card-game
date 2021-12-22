@@ -24,7 +24,8 @@ Each participant will run the same software, which will be a Python program runn
 Our environment is built on docker containers, each container running the same code. Commands from nodes will be taken from STDIN in terminal. Before each command we check that the leader node is alive and healthy.
 
 The following commands are available:
-* `join <ip>` - joins an ongoing game or creates a game if first participant joining the IP
+
+* `join <ip>` - joins an ongoing game or creates a game if first participant
 * `leave` - leaves the game
 * `list` - list the state the node knows off
 * `start_game` - the leader can start a game
