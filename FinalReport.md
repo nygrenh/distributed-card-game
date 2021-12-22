@@ -1,6 +1,6 @@
 ---
 title: Distributed Card Game
-author: Sebastian Sergelius, Henrik Nygren, Daniel Koch
+author: "Group 27: Sebastian Sergelius, Henrik Nygren, Daniel Koch"
 toc: true
 include-before: |
   \newpage
