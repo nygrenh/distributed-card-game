@@ -118,12 +118,10 @@ The leader also broadcasts the new list of nodes to all other nodes whenever a n
 
 ## Consistency and synchronization
 
-Consistency is achieved by broadcasting the joining and leaving nodes. If a node has crashed, this node will not be able to send a leave request.
+
+We have implemented a strong consistency, we try to post all updates to all nodes and keep the data consistent. Consistency is achieved by broadcasting all the changed information to everyone such as the joining and leaving nodes and the encrypted game decks. If a node has crashed, this node will not be able to send a leave request.
 
 If the leader crashes and some other node writes a command, such as `list`, a leader election should start, once the leader election is done, once we have a new leader, it is broadcasted to everyone.
-
-Consistency model of data should not just include who's the leader but all the shared state.
-We have implemented a strong consistency, we try to post all updates to all nodes and keep the data consistent.
 
 ## Fault tolerance
 
