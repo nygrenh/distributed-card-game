@@ -136,8 +136,9 @@ The chosen approach should scale to some degree. It should be possible to add ma
 # Performance
 
 The performance of the game is asynchronous. Performance wise there is no issue when shuffling the game deck, as currently we have 52 cards.
-making the deck bigger does not affect the performance too much: only the leader and one onther node will encrypt all cards once. Only problem is that
-the whole encyrpted deck will be broadcasted to every node, so if there are many nodes and a very big deck this is a lot of data sent.
+making the deck bigger does not affect the performance too much: only the leader and one other node will encrypt all cards once. Only problem is that the whole encrypted deck will be broadcasted to every node, so if there are many nodes and a very big deck this is a lot of data sent.
+
+Also, performance wise broadcasting the whole NODES state to every player when there are many players, could cause an issue. To improve this we could broadcast just the player node number and then each participant could just remove that one from their list.
 
 # Lessons learned
 
@@ -149,4 +150,5 @@ the whole encyrpted deck will be broadcasted to every node, so if there are many
 # Appendix
 
 - We didn't completely implement Mental Poker, but we encrypted the deck two times and decrypted it in the same manner.
+- Score given is not implemented when the winner is announced, so sharing the score given state with each node didn't finish, although it is not far away as we have the fairness voting.
 
