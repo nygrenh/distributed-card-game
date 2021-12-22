@@ -5,6 +5,7 @@ Requirements:
 * Python 3.9
 * Poetry (https://python-poetry.org/)
 * Docker (tested with Docker version 20.10.7)
+* docker-compose (1.29.2)
 
 First line is for Visual Studio Code support.
 ```bash
@@ -15,6 +16,7 @@ poetry install
 ## Running
 
 ### Easy way
+
 Easily started by running `./start-tmux.sh` and switching to tab 0 (Ctrl + b and 0).
 To get node IP, go to tab 1 (Ctrl + b and 1) and run `docker network inspect distributed-card-game_default`.
 
