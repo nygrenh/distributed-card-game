@@ -55,24 +55,28 @@ The two treads communicate with each other using shared memory. Because we are r
 Either actions in the UI thread or the web server thread can trigger communication to the other nodes. Communication is done by directly starting an HTTP request to the other node when needed. Messages are JSON messages that are posted to the other node's port 6376.
 The most common HTTP requests and responses have Python types that act as documenting the messages.
 
-| Endpoint 	| Method 	| Data 	| Response 	| Description 	|
-|---	|---	|---	|---	|---	|
-| /election 	| POST 	| origin ip 	| taking_over: bool 	| Used by our Reverse Bully algorithm to send out election message to nodes with smaller number, as a response you will receive if there are nodes taking over, i.e. nodes with smaller number 	|
-| /new-leader 	| POST 	| origin ip 	| message: str 	| Endpoint used to set new leader for node after election is done. 	|
-| /health 	| GET 	| NaN 	| message: str 	| Used by nodes to check the leader health before each command, if no response in 5 seconds, we start election. 	|
-| /join 	| POST 	| origin ip 	| message: str nodes: Dict[str, Player] your_player_number: int leader_node_number: int 	| Joining node sends join <ip> command in the command line. At this endpoint we handle giving the participants a name and maps the name with his IP and player_number. We also give the joining participant the distributed state and aswell broadcast to everyone that a new node has joined. 	|
-| /leave 	| POST 	| origin ip 	| message: str 	| Verifies that a participant is in game and deletes him from the player list, broadcasts to the current in-game players state. 	|
-| /new-node-list 	| POST 	| NewNodeListMessage: nodes: Dict[int, Player] next_player_number: int 	| message: str 	| Handles setting the game state for node if someone joins or leave. 	|
-| /get-nodes 	| GET 	| NaN 	| message: str nodes: state.NODES 	| This is used for Fault tolerance, if a node has crashed and tries to join with same IP, we can return him the current game and we don't need to reset his player number. 	|
-| /game-starting 	| POST 	| NaN 	| message: str 	| Sets game phase to ongoing, which means other players can't join the game during this phase. 	|
-| /plz-help-with-encrypting 	| POST 	| deck: str 	| deck: str 	| The leader sends to one randomly chosen node his encrypted deck as JSON, the helper node in this endpoint creates the deck from this data and encrypts it once again, shuffles it and broadcast the double encyprted deck to each player in game. 	|
-| /double-encrypted-deck 	| POST 	| deck: str 	| message: str 	| Each node receives the double encrypted deck here and saves it to his state. 	|
-| /deal-result 	| POST 	| who_get_what_cards: Dict[int, str] helper_player_number: int 	| message: str 	| Leader performs the deal-result to each node, once a node receives this information, he sends to the helper node that he has received the info that cards are dealt. Saves the dealt cards in state. 	|
-| /helper-key 	| POST 	| key: str 	| message: str 	| The helper node distributes its encryption key to node, node saves this to state for later game verification 	|
-| /leader-key 	| POST 	| key: str 	| message: str 	| The Leader distributes its encryption key to node, node saves this to state for later game verification 	|
-| /i-got-the-dealt-cards 	| POST 	| origin ip 	| message: str 	| This endpoint is used by the helper node to determine that majority (50% or more) has received the dealt cards and then he can start distributing the private key to each player. 	|
-| /winner 	| POST 	| winner: int 	| message: str 	| Triggered when leader determines the winner. Each player starts verifying game and participating in fairness voting, this is done in its own thread. 	|
-| /game-winner-verification-result 	| POST 	| agree: bool 	| message: str 	| Each player has check from the double encrypted deck and the dealt cards by the leader that they match and the broadcasted winner is the one that leader claims. Every node sends to each and every node in game the verification boolean.   If half of more agree to this fairness voting, the winner can be announced. 	|
+\scriptsize
+
+| Endpoint | Data | Response | Description |
+|---	|---	|---	|---	|
+| POST /election 	| origin ip 	| taking_over: bool 	| Used by our Reverse Bully algorithm to send out election message to nodes with smaller number, as a response you will receive if there are nodes taking over, i.e. nodes with smaller number 	|
+| POST /new-leader 	| origin ip 	| message: str 	| Endpoint used to set new leader for node after election is done. 	|
+| GET /health 	| NaN 	| message: str 	| Used by nodes to check the leader health before each command, if no response in 5 seconds, we start election. 	|
+| POST /join 	| origin ip 	| message: str nodes: Dict[str, Player] your_player_number: int leader_node_number: int 	| Joining node sends join <ip> command in the command line. At this endpoint we handle giving the participants a name and maps the name with his IP and player_number. We also give the joining participant the distributed state and aswell broadcast to everyone that a new node has joined. 	|
+| POST /leave 	| origin ip 	| message: str 	| Verifies that a participant is in game and deletes him from the player list, broadcasts to the current in-game players state. 	|
+| POST /new-node-list 	| NewNodeListMessage: nodes: Dict[int, Player] next_player_number: int 	| message: str 	| Handles setting the game state for node if someone joins or leave. 	|
+| GET /get-nodes 	| NaN 	| message: str nodes: state.NODES 	| This is used for Fault tolerance, if a node has crashed and tries to join with same IP, we can return him the current game and we don't need to reset his player number. 	|
+| POST /game-starting 	| NaN 	| message: str 	| Sets game phase to ongoing, which means other players can't join the game during this phase. 	|
+| POST /plz-help-with-encrypting 	| deck: str 	| deck: str 	| The leader sends to one randomly chosen node his encrypted deck as JSON, the helper node in this endpoint creates the deck from this data and encrypts it once again, shuffles it and broadcast the double encyprted deck to each player in game. 	|
+| POST /double-encrypted-deck 	| deck: str 	| message: str 	| Each node receives the double encrypted deck here and saves it to his state. 	|
+| POST /deal-result 	| who_get_what_cards: Dict[int, str] helper_player_number: int 	| message: str 	| Leader performs the deal-result to each node, once a node receives this information, he sends to the helper node that he has received the info that cards are dealt. Saves the dealt cards in state. 	|
+| POST /helper-key 	| key: str 	| message: str 	| The helper node distributes its encryption key to node, node saves this to state for later game verification 	|
+| POST /leader-key 	| key: str 	| message: str 	| The Leader distributes its encryption key to node, node saves this to state for later game verification 	|
+| POST /i-got-the-dealt-cards 	| origin ip 	| message: str 	| This endpoint is used by the helper node to determine that majority (50% or more) has received the dealt cards and then he can start distributing the private key to each player. 	|
+| POST /winner 	| winner: int 	| message: str 	| Triggered when leader determines the winner. Each player starts verifying game and participating in fairness voting, this is done in its own thread. 	|
+| POST /game-winner-verification-result 	| agree: bool 	| message: str 	| Each player has check from the double encrypted deck and the dealt cards by the leader that they match and the broadcasted winner is the one that leader claims. Every node sends to each and every node in game the verification boolean.   If half of more agree to this fairness voting, the winner can be announced. 	|
+
+\normalsize
 
 ## Process
 
