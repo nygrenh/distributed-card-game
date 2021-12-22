@@ -102,18 +102,16 @@ The most common HTTP requests and responses have Python types that act as docume
 
 Each participant is named by a number that is picked by the joining order to the game.
 
-- Once a new participant joins to the game, it is given a list of all other nodes in the game.
-- The leader also broadcasts the new list of nodes to all other nodes whenever a new node joins.
-
-
+Once a new participant joins to the game, it is given a list of all other nodes in the game.
+The leader also broadcasts the new list of nodes to all other nodes whenever a new node joins.
 ## Consistency and synchronization
 
 Consistency is achieved by broadcasting the joining and leaving nodes. If a node has crashed, this node will not be able to send a leave request.
 
-If the leader crashes, a leader election should start, once the leader election is done, the new leader will ensure that all the nodes he knows about is alive and responds to a heartbeat.
+If the leader crashes and some other node writes a command, such as `list`, a leader election should start, once the leader election is done, once we have a new leader, it is broadcasted to everyone.
 
-- Consistency model of data (should not just include who's the leader but all the shared state)
-  * Strong consistency: updates are posted to all nodes
+Consistency model of data should not just include who's the leader but all the shared state.
+We have implemented a strong consistency, we try to post all updates to all nodes and keep the data consistent.
 
 ## Fault tolerance
 
@@ -123,14 +121,14 @@ Timeout is used by the leader once the game has started and the deck is shuffled
 
 Every time a node sends a command to the leader, it checks for the leader nodes health, if the leader doesn't answer within 5 seconds, we will start the Reverse Bully Algorithm (prefers small numbers).
 
-- Dropping of non-leader nodes does not prevent the game from continuing because in order to determine the outcome of the game, we need only the majority of the nodes to agree on the result
-- If enough non-leaders disconnect the game will eventually break because non-leader health is not checked. The breakpoint when n/2 non-leader nodes fail at the same time, n is the total number of nodes, including leader. This could be fixed by doing health checks on non-leaders too.
-- Failed node can join back and get their old position back.
+Dropping of non-leader nodes does not prevent the game from continuing because in order to determine the outcome of the game, we need only the majority of the nodes to agree on the result
+
+Some minor things we didn't have time to finish is that if enough non-leaders disconnect the game will eventually break because non-leader health is not checked. The breakpoint when n/2 non-leader nodes fail at the same time, n is the total number of nodes, including leader. This could be fixed by doing health checks on non-leaders too.
 ## Consensus
 
 Consensus is achieved when each participant sends their (encrypted) picked card up to every other participant, these participants then decrypt all cards with keys received from two shuffling partners. When leader broadcasts the winner, other nodes will get the result and check if they agree. They will broadcast OK or Not OK to everyone and wait for results from other nodes.
 
-- If majority opionion on the fairness of the game cannot be reached, we will just conclude that the game was not fair, and the round won't have a winner.
+If majority opionion on the fairness of the game cannot be reached, we will just conclude that the game was not fair, and the round won't have a winner.
 # System scalability
 
 The chosen approach should scale to some degree. It should be possible to add many participants to the game. One major limitation of scalability could be the fact that is that everyone is connecting to every other participant, meaning that at some point, each node has too many connections. However, the protocol used here is so lightweight that the number of participants would need to grow to be very large before anyone would be overwhelmed with messages. The scalability of the approach could be improved by utilizing a structured peer-to-peer network.
