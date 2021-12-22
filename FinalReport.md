@@ -22,7 +22,7 @@ Our environment is built on docker containers, each container running the same c
 
 The following commands are available:
 * `join <ip>` - joins an ongoing game or creates a game if first participant joining the IP
-* `leave` - leaves the game (not implemented)
+* `leave` - leaves the game
 * `list` - list the state the node knows off
 * `start_game` - the leader can start a game
 * `debug` - to debug game state
@@ -31,7 +31,7 @@ The following commands are available:
 
 ## Creating and joining a game
 
-Each participant will be running the same environment. First participant node will join another (leader) node, which will define the leader node. The first joining participant will provide the leader node its IP-address it used to join with. Once another participant node joins, he can join any of the participants in the game.
+Each participant will be running the same environment. First participant node will join another (leader) node, which will define the leader node. The first joining participant will provide the leader node its IP-address it used to join with. Once another participant node joins, he can join any of the participants in the game. If new node tries to join non-leader node, they will automatically be redirected to the leader node.
 
 ## Leaving a game
 
@@ -39,26 +39,39 @@ A participant can leave the game. Once the participants leaves the game, the lea
 
 ## Playing the game
 
-The game can start once players have joined. Leader node broadcasts that game is starting. Leader picks another node who he uses to shuffle the deck with. Once deck is shuffled, each player are dealt the card in order
+The game can start once players have joined and start_game command is issued at leader node. Leader node broadcasts that game is starting. Leader picks another node who he uses to shuffle the deck with. Once deck is shuffled, each player is dealt the card in order of player name.
 
 # Design Principles
 
 ## Architecture
 
-- Each node has a python program that runs in two primary threads:
-    - One thread for reading commands from a user from the terminal (UI thread)
-    - Other thread for running the flask http server for receiving request from other nodes (Web server thread)
--  The two treads communicate with each other using shared memory
-
-
+Each node is running the same environemnt, which is based on Python. These nodes run in a docker container where each node has two threads, which are the following:
+  - One thread for reading commands from a user from the terminal (UI thread)
+  - Other thread for running the flask http server for receiving request from other nodes (Web server thread)
+The two treads communicate with each other using shared memory. Because we are running a distributed system that requires sometimes voting and waiting, we additionally spawn threads in these cases.
 ## Communication
 
-- Either actions in the UI thread or the web server thread can trigger communication to the other nodes
-  * Communication is done by directly starting an HTTP request to the other node when needed
-- Messages are JSON messages that are posted to the other node's port 6376
-- HTTP requests and responses have python types that act as documenting the messages
+Either actions in the UI thread or the web server thread can trigger communication to the other nodes. Communication is done by directly starting an HTTP request to the other node when needed. Messages are JSON messages that are posted to the other node's port 6376.
+The most common HTTP requests and responses have Python types that act as documenting the messages.
 
-- List of all messages and explanation of them (https://www.tablesgenerator.com/markdown_tables)
+| Endpoint 	| Method 	| Data 	| Response 	| Description 	|
+|---	|---	|---	|---	|---	|
+| /election 	| POST 	| origin ip 	| taking_over: bool 	| Used by our Reverse Bully algorithm to send out election message to nodes with smaller number, as a response you will receive if there are nodes taking over, i.e. nodes with smaller number 	|
+| /new-leader 	| POST 	| origin ip 	| message: str 	| Endpoint used to set new leader for node after election is done. 	|
+| /health 	| GET 	| NaN 	| message: str 	| Used by nodes to check the leader health before each command, if no response in 5 seconds, we start election. 	|
+| /join 	| POST 	| origin ip 	| message: str nodes: Dict[str, Player] your_player_number: int leader_node_number: int 	| Joining node sends join <ip> command in the command line. At this endpoint we handle giving the participants a name and maps the name with his IP and player_number. We also give the joining participant the distributed state and aswell broadcast to everyone that a new node has joined. 	|
+| /leave 	| POST 	| origin ip 	| message: str 	| Verifies that a participant is in game and deletes him from the player list, broadcasts to the current in-game players state. 	|
+| /new-node-list 	| POST 	| NewNodeListMessage: nodes: Dict[int, Player] next_player_number: int 	| message: str 	| Handles setting the game state for node if someone joins or leave. 	|
+| /get-nodes 	| GET 	| NaN 	| message: str nodes: state.NODES 	| This is used for Fault tolerance, if a node has crashed and tries to join with same IP, we can return him the current game and we don't need to reset his player number. 	|
+| /game-starting 	| POST 	| NaN 	| message: str 	| Sets game phase to ongoing, which means other players can't join the game during this phase. 	|
+| /plz-help-with-encrypting 	| POST 	| deck: str 	| deck: str 	| The leader sends to one randomly chosen node his encrypted deck as JSON, the helper node in this endpoint creates the deck from this data and encrypts it once again, shuffles it and broadcast the double encyprted deck to each player in game. 	|
+| /double-encrypted-deck 	| POST 	| deck: str 	| message: str 	| Each node receives the double encrypted deck here and saves it to his state. 	|
+| /deal-result 	| POST 	| who_get_what_cards: Dict[int, str] helper_player_number: int 	| message: str 	| Leader performs the deal-result to each node, once a node receives this information, he sends to the helper node that he has received the info that cards are dealt. Saves the dealt cards in state. 	|
+| /helper-key 	| POST 	| key: str 	| message: str 	| The helper node distributes its encryption key to node, node saves this to state for later game verification 	|
+| /leader-key 	| POST 	| key: str 	| message: str 	| The Leader distributes its encryption key to node, node saves this to state for later game verification 	|
+| /i-got-the-dealt-cards 	| POST 	| origin ip 	| message: str 	| This endpoint is used by the helper node to determine that majority (50% or more) has received the dealt cards and then he can start distributing the private key to each player. 	|
+| /winner 	| POST 	| winner: int 	| message: str 	| Triggered when leader determines the winner. Each player starts verifying game and participating in fairness voting, this is done in its own thread. 	|
+| /game-winner-verification-result 	| POST 	| agree: bool 	| message: str 	| Each player has check from the double encrypted deck and the dealt cards by the leader that they match and the broadcasted winner is the one that leader claims. Every node sends to each and every node in game the verification boolean.   If half of more agree to this fairness voting, the winner can be announced. 	|
 
 ## Process
 
@@ -72,9 +85,10 @@ The game can start once players have joined. Leader node broadcasts that game is
     - Sends encrypted deck to helper node
     - Helper node encrypts the deck again, shuffles and returns to leader
       - Helper node also sends a copy of the double encrypted deck to each player for later game verification
-  - Once the deck is encrypted by leader and fellow player, all the nodes know who got dealt what cards, because the cards are dealt from the shuffled double encrypted deck in order (by player name/number).
+  - Once the deck is encrypte
+  d by leader and fellow player, all the nodes know who got dealt what cards, because the cards are dealt from the shuffled double encrypted deck in order (by player name/number).
   - Each player broadcasts that they have received the double encrypted deck
-  - Once the most players have received the deck, the helper node broadcasts its private key
+  - Once most players have received the deck, the helper node broadcasts its private key
   - Once helper private key is received by leader, leader broadcasts his private key
   - "Imaginally" each player flips their card and the leader checks who got the highest card
   - Leader broadcasts to everyone the winner player name
@@ -94,7 +108,7 @@ Each participant is named by a number that is picked by the joining order to the
 
 ## Consistency and synchronization
 
-Consistency is achieved by broadcasting the joining and leaving nodes. If a node has crashed, this node will not be able to send a leave request. The leader node will constantly ensure that each node is in the game, if the player doesn't pick up the card or answer in a sufficient time, the node will be marked as dead. Other nodes do not need to know about these dead nodes, because the leader node will broadcast once the game has ended, by timeout or if every alive node has picked up his card.
+Consistency is achieved by broadcasting the joining and leaving nodes. If a node has crashed, this node will not be able to send a leave request.
 
 If the leader crashes, a leader election should start, once the leader election is done, the new leader will ensure that all the nodes he knows about is alive and responds to a heartbeat.
 
@@ -110,9 +124,11 @@ Timeout is used by the leader once the game has started and the deck is shuffled
 Every time a node sends a command to the leader, it checks for the leader nodes health, if the leader doesn't answer within 5 seconds, we will start the Reverse Bully Algorithm (prefers small numbers).
 
 - Dropping of non-leader nodes does not prevent the game from continuing because in order to determine the outcome of the game, we need only the majority of the nodes to agree on the result
+- If enough non-leaders disconnect the game will eventually break because non-leader health is not checked. The breakpoint when n/2 non-leader nodes fail at the same time, n is the total number of nodes, including leader. This could be fixed by doing health checks on non-leaders too.
+- Failed node can join back and get their old position back.
 ## Consensus
 
-Consensus is achieved when each participant sends their (encrypted) picked card up to every other participant, these participants then decrypt all cards with keys asked from two shuffling partners. Once everyone has decrypted every participant's card, the leader will broadcast the result of the game, and we will vote if the game was valid to the leader. If we have a consensus, the highest card wins.
+Consensus is achieved when each participant sends their (encrypted) picked card up to every other participant, these participants then decrypt all cards with keys received from two shuffling partners. When leader broadcasts the winner, other nodes will get the result and check if they agree. They will broadcast OK or Not OK to everyone and wait for results from other nodes.
 
 - If majority opionion on the fairness of the game cannot be reached, we will just conclude that the game was not fair, and the round won't have a winner.
 # System scalability
@@ -121,9 +137,9 @@ The chosen approach should scale to some degree. It should be possible to add ma
 
 # Performance
 
-The performance of the game is asynchronous. Performance wise there is no issue when shuffling the game deck, as currently we have 52 cards, but with a big amount of participants and a bigger deck this could cause an issue when each player has lifted their card, as once they have lifted their card, they will broadcast to each participant their encrypted card. Each player will then request the encryption keys from the leader and the randomly selected other participant, who was involved in shuffling the deck and then each player can decrypt other players cards and his own.
-
-This encryption and decryption purpose is to make sure that no one is cheating, and we can reach a consensus if there was some cheating.
+The performance of the game is asynchronous. Performance wise there is no issue when shuffling the game deck, as currently we have 52 cards.
+making the deck bigger does not affect the performance too much: only the leader and one onther node will encrypt all cards once. Only problem is that
+the whole encyrpted deck will be broadcasted to every node, so if there are many nodes and a very big deck this is a lot of data sent.
 
 # Lessons learned
 

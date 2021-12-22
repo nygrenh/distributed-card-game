@@ -136,29 +136,6 @@ def choose_follower_to_help_with_shuffling() -> Player:
     return chosen_one
 
 
-def verify_game_and_participate_in_fairness_voting():
-    verify_dealt_cards = {}
-    print("Verifying game.")
-    for node in sorted(state.NODES):
-        verify_dealt_cards[node] = state.DOUBLE_ENCRYPTED_DECK.pop()
-
-
-    highest_card = -1
-    highest_card_owner = None
-    for (node, card) in verify_dealt_cards.items():
-        helper_decrypted_card = Deck.decrypt_helper(state.HELPER_ENCRYPTION_KEY, card)
-        decrypted_card_value = Deck.decrypt_one(state.ENCRYPTION_KEY, helper_decrypted_card)
-        print(f"According to my knowledge, player {node} received card {decrypted_card_value}.")
-        if decrypted_card_value > highest_card:
-            highest_card = decrypted_card_value
-            highest_card_owner = node
-
-    agree_on_winner = highest_card_owner == state.WINNER_NUMBER 
-    print(f"I found out that the player {highest_card_owner} is the winner, my agreement with leader: {agree_on_winner}")
-    game_winner: GameWinnerVerificationResultRequest = { "agree": agree_on_winner }
-    share_your_fairness_vote_and_wait_for_results(game_winner, state.WINNER_NUMBER)
-
-
 def share_your_fairness_vote_and_wait_for_results(game_winner: GameWinnerVerificationResultRequest, winner_number: int):
     print("Starting fairness vote.")
     for node in state.NODES.values():
@@ -177,16 +154,6 @@ def broadcast_dealt_cards(deal_request: DealResultsBroadcastRequest):
     for node in state.NODES.values():
         requests.post(
             f"http://{node['ip']}:6376/deal-results", json=deal_request
-        )
-
-# Used when a new player joins a game
-def broadcast_new_node_list():
-    for node in state.NODES.values():
-        if node["player_number"] == state.OWN_NODE_NUMBER:
-            continue
-        new_node_list: NewNodeListMessage = {"nodes": state.NODES, "next_player_number": state.NEXT_PLAYER_NUMBER}
-        requests.post(
-            f"http://{node['ip']}:6376/new-node-list", json=new_node_list
         )
 
 def broadcast_game_starting():

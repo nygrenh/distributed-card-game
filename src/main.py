@@ -6,7 +6,7 @@ from threading import Lock, Thread
 import pdb
 import traceback
 from classes import DealResultsBroadcastRequest, Deck, DoubleEncryptedDeckRequest, GamePhase, GameWinnerVerificationResultRequest, JoinRequest, JoinResponse, NewNodeListMessage, Player, PlzHelpWithEncryptingDeckRequest, PlzHelpWithEncryptingDeckResponse, ReverseBullyElectionResponse, ShareKeyRequest, WinnerRequest
-from command_line import CommandLoop, broadcast_new_node_list, verify_game_and_participate_in_fairness_voting
+from command_line import CommandLoop, share_your_fairness_vote_and_wait_for_results
 import state as state
 import reverse_bully as bully
 
@@ -39,7 +39,7 @@ def start_cmdloop():
         traceback.print_exc()
         pdb.set_trace()
 
-
+# Reverse Bully election
 @app.route("/election", methods=["POST"])
 def election() -> ReverseBullyElectionResponse:
     origin = request.remote_addr
@@ -52,12 +52,12 @@ def election() -> ReverseBullyElectionResponse:
             return {"taking_over": True}
     return {"taking_over": False}
 
-
+# Reverse bully, this is spawned in own thread
 def take_over_bully():
     print("Taking over the election.")
     bully.reverse_bully()
 
-
+# Reverse bully, new leader announced
 @app.route("/new-leader", methods=["POST"])
 def assign_new_leader():
     origin = request.origin
@@ -69,13 +69,9 @@ def assign_new_leader():
             print(f"Assigning new leader: {origin_number}")
             state.LEADER_NODE_NUMBER = origin_number
             state.LEADER_ELECTION_ONGOING = False
+        else:
+            print("Someone with smaller node number is trying to take over.")
     return {"message": "Ok, assigned new leader."}
-
-
-@app.route("/", methods=["GET"])
-def home():
-    return {"message": "Hello, World!"}
-
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -150,6 +146,34 @@ def register_nodes():
         registration_lock.release()
 
 
+@app.route("/leave", methods=["POST"])
+def unregister_nodes():
+    origin = request.remote_addr
+    player_name = next(player_name for (player_name, node) in state.NODES.items() if node["ip"] == origin)
+    if player_name:
+        state.NODES.pop(player_name)
+        print("Nodes still in game", state.NODES)
+        broadcast_new_node_list()
+        return {"message": "Goodbye"}
+    return {"message": "You are not part of this game"}
+
+# Used when a new player joins a game
+def broadcast_new_node_list():
+    for node in state.NODES.values():
+        if node["player_number"] == state.OWN_NODE_NUMBER:
+            continue
+        new_node_list: NewNodeListMessage = {"nodes": state.NODES, "next_player_number": state.NEXT_PLAYER_NUMBER}
+        requests.post(
+            f"http://{node['ip']}:6376/new-node-list", json=new_node_list
+        )
+
+@app.route("/new-node-list", methods=["POST"])
+def new_node_list():
+    state.NODES = {int(k): v for k, v in request.json["nodes"].items()}
+    state.NEXT_PLAYER_NUMBER = request.json["next_player_number"]
+    print("I received the new node list.")
+    return {"message": "New node list received"}
+
 @app.route("/helper-key", methods=["POST"])
 def handle_helper_key():
     json: ShareKeyRequest = request.json
@@ -164,12 +188,6 @@ def handle_leader_key():
     print("I received the leader node private key.")
     return {"message": "Thanks!"}
 
-@app.route("/new-node-list", methods=["POST"])
-def new_node_list():
-    state.NODES = {int(k): v for k, v in request.json["nodes"].items()}
-    state.NEXT_PLAYER_NUMBER = request.json["next_player_number"]
-    print("I received the new node list.")
-    return {"message": "New node list received"}
 
 @app.route("/game-starting", methods=["POST"])
 def game_starting():
@@ -217,6 +235,28 @@ def handle_winner():
         print("I lost")
     Thread(target=verify_game_and_participate_in_fairness_voting).start()
     return {"message": "Ok"}
+
+def verify_game_and_participate_in_fairness_voting():
+    verify_dealt_cards = {}
+    print("Verifying game.")
+    for node in sorted(state.NODES):
+        verify_dealt_cards[node] = state.DOUBLE_ENCRYPTED_DECK.pop()
+
+
+    highest_card = -1
+    highest_card_owner = None
+    for (node, card) in verify_dealt_cards.items():
+        helper_decrypted_card = Deck.decrypt_helper(state.HELPER_ENCRYPTION_KEY, card)
+        decrypted_card_value = Deck.decrypt_one(state.ENCRYPTION_KEY, helper_decrypted_card)
+        print(f"According to my knowledge, player {node} received card {decrypted_card_value}.")
+        if decrypted_card_value > highest_card:
+            highest_card = decrypted_card_value
+            highest_card_owner = node
+
+    agree_on_winner = highest_card_owner == state.WINNER_NUMBER 
+    print(f"I found out that the player {highest_card_owner} is the winner, my agreement with leader: {agree_on_winner}")
+    game_winner: GameWinnerVerificationResultRequest = { "agree": agree_on_winner }
+    share_your_fairness_vote_and_wait_for_results(game_winner, state.WINNER_NUMBER)
 
 
 @app.route("/game-winner-verification-result", methods=["POST"])
@@ -270,19 +310,6 @@ def broadcast_helper_encryption_key():
         requests.post(
             f"http://{node['ip']}:6376/helper-key", json=body
         )
-
-
-@app.route("/leave", methods=["POST"])
-def unregister_nodes():
-    origin = request.remote_addr
-    player_name = next(player_name for (player_name, node) in state.NODES.items() if node["ip"] == origin)
-    if player_name:
-        state.NODES.pop(player_name)
-        print("Nodes still in game", state.NODES)
-        broadcast_new_node_list()
-        return {"message": "Goodbye"}
-    return {"message": "You are not part of this game"}
-
 
 if __name__ == "__main__":
     main()
