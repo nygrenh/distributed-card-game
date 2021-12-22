@@ -84,6 +84,9 @@ class JoinResponse(TypedDict):
     your_player_number: int
     leader_node_number: int
 
+class LeaveResponse(TypedDict):
+    message: str
+
 class DoubleEncryptedDeckRequest(TypedDict):
     deck: str
 

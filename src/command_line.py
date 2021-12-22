@@ -1,7 +1,7 @@
 import random
 import time
 import requests
-from classes import DealResultsBroadcastRequest, Deck, GamePhase, GameWinnerVerificationResultRequest, JoinRequest, JoinResponse, NewNodeListMessage, Player, PlzHelpWithEncryptingDeckRequest, PlzHelpWithEncryptingDeckResponse, ShareKeyRequest, WinnerRequest
+from classes import DealResultsBroadcastRequest, Deck, GamePhase, GameWinnerVerificationResultRequest, JoinRequest, JoinResponse, LeaveResponse, NewNodeListMessage, Player, PlzHelpWithEncryptingDeckRequest, PlzHelpWithEncryptingDeckResponse, ShareKeyRequest, WinnerRequest
 import pdb
 import cmd
 import state
@@ -42,6 +42,12 @@ class CommandLoop(cmd.Cmd):
         state.OWN_NODE_NUMBER = res["your_player_number"]
         # Assign leader
         state.LEADER_NODE_NUMBER = res["leader_node_number"]
+    def do_leave(self, line: str):
+        leader_ip = next(node["ip"] for node in state.NODES.values() if node["player_number"] == state.LEADER_NODE_NUMBER)
+        result: LeaveResponse = requests.post(f"http://{leader_ip}:6376/leave").json()
+        print(f"{result['message']}")
+        state.empty_game_states()
+        state.NODES = {}
 
     def do_list(self, line: str):
         print("Listing all nodes in the game.")

@@ -275,9 +275,10 @@ def broadcast_helper_encryption_key():
 @app.route("/leave", methods=["POST"])
 def unregister_nodes():
     origin = request.remote_addr
-    if origin in state.NODES.keys():
-        del state.NODES[origin]
-        print("nodes_after_leave", state.NODES)
+    player_name = next(player_name for (player_name, node) in state.NODES.items() if node["ip"] == origin)
+    if player_name:
+        state.NODES.pop(player_name)
+        print("Nodes still in game", state.NODES)
         broadcast_new_node_list()
         return {"message": "Goodbye"}
     return {"message": "You are not part of this game"}
