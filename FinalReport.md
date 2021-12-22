@@ -1,12 +1,15 @@
+---
+title: Distributed Card Game
+author: Sebastian Sergelius, Henrik Nygren, Daniel Koch
+toc: true
+include-before: |
+  \newpage
+geometry: margin=4cm
+---
 \newpage
+# Introduction
 
 In this project, we will create a distributed card game, where the goal is to get dealt the highest card. The participants will connect to each in peer-to-peer fashion, and the system will try to ensure that the card deck in the game will be shuffled fairly.
-
-# Card game
-
-Group name: - #27
-
-Members: Daniel Koch, Henrik Nygren, Sebastian Sergelius
 
 # Project Goal
 
