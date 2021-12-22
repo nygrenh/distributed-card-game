@@ -46,8 +46,10 @@ The game can start once players have joined and start_game command is issued at 
 ## Architecture
 
 Each node is running the same environemnt, which is based on Python. These nodes run in a docker container where each node has two threads, which are the following:
-  - One thread for reading commands from a user from the terminal (UI thread)
-  - Other thread for running the flask http server for receiving request from other nodes (Web server thread)
+
+* One thread for reading commands from a user from the terminal (UI thread)
+* Other thread for running the flask http server for receiving request from other nodes (Web server thread)
+
 The two treads communicate with each other using shared memory. Because we are running a distributed system that requires sometimes voting and waiting, we additionally spawn threads in these cases.
 
 ## Communication
