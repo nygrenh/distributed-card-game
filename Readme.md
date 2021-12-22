@@ -14,6 +14,8 @@ poetry install
 
 ## Running
 
+Easily started by running `./start-tmux.sh` and switching to tab 1.
+
 In one terminal, run `docker-compose up --build`.
 
 Then get the ip addresses of the containers by running `docker network inspect distributed-card-game_default`.
